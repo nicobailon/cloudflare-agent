@@ -14,14 +14,22 @@ import {
   type StreamTextOnFinishCallback,
 } from "ai";
 import { createOpenAI } from "@ai-sdk/openai";
+import { createGemini } from "@ai-sdk/gemini";
 import { processToolCalls } from "./utils";
 import { tools, executions } from "./tools";
 import { AsyncLocalStorage } from "node:async_hooks";
+import { MODEL_TYPES } from "./shared";
 
 // Environment variables type definition
 export type Env = {
   OPENAI_API_KEY: string;
+  GEMINI_API_KEY: string;
   Chat: AgentNamespace<Chat>;
+};
+
+// Request parameters type definition
+type RequestParams = {
+  model?: string;
 };
 
 // we use ALS to expose the agent context to the tools
@@ -39,34 +47,45 @@ export class Chat extends AIChatAgent<Env> {
     return agentContext.run(this, async () => {
       const dataStreamResponse = createDataStreamResponse({
         execute: async (dataStream) => {
-          // Process any pending tool calls from previous messages
-          // This handles human-in-the-loop confirmations for tools
-          const processedMessages = await processToolCalls({
-            messages: this.messages,
-            dataStream,
-            tools,
-            executions,
-          });
-
-          // Initialize OpenAI client with API key from environment
+          // Get the model from the request parameters or default to GPT-4o
+          const requestParams = this.requestParams as RequestParams;
+          const modelType = requestParams?.model || MODEL_TYPES.GPT4O;
+          
+          // Initialize the OpenAI client
           const openai = createOpenAI({
             apiKey: this.env.OPENAI_API_KEY,
           });
+          
+          // Initialize the Gemini client
+          const gemini = createGemini({
+            apiKey: this.env.GEMINI_API_KEY,
+          });
 
-          // Cloudflare AI Gateway
-          // const openai = createOpenAI({
-          //   apiKey: this.env.OPENAI_API_KEY,
-          //   baseURL: this.env.GATEWAY_BASE_URL,
-          // });
+          // Process any pending tool calls from previous messages (only for GPT-4o)
+          let processedMessages = this.messages;
+          if (modelType === MODEL_TYPES.GPT4O) {
+            processedMessages = await processToolCalls({
+              messages: this.messages,
+              dataStream,
+              tools,
+              executions,
+            });
+          }
 
-          // Stream the AI response using GPT-4
+          // Stream the AI response using the selected model
           const result = streamText({
-            model: openai("gpt-4o-2024-11-20"),
+            model: modelType === MODEL_TYPES.GPT4O 
+              ? openai("gpt-4o-2024-11-20") 
+              : gemini("gemini-flash"),
             system: `
-              You are a helpful assistant that can do various tasks. If the user asks, then you can also schedule tasks to be executed later. The input may have a date/time/cron pattern to be input as an object into a scheduler The time is now: ${new Date().toISOString()}.
+              You are a helpful assistant that can do various tasks. ${
+                modelType === MODEL_TYPES.GPT4O 
+                  ? "If the user asks, then you can also schedule tasks to be executed later. The input may have a date/time/cron pattern to be input as an object into a scheduler" 
+                  : "You're currently running as the Gemini Flash model, which does not support tools."
+              } The time is now: ${new Date().toISOString()}.
               `,
             messages: processedMessages,
-            tools,
+            tools: modelType === MODEL_TYPES.GPT4O ? tools : undefined, // Only provide tools for GPT-4o
             onFinish,
             maxSteps: 10,
           });
@@ -79,6 +98,7 @@ export class Chat extends AIChatAgent<Env> {
       return dataStreamResponse;
     });
   }
+  
   async executeTask(description: string, task: Schedule<string>) {
     await this.saveMessages([
       ...this.messages,
@@ -102,6 +122,14 @@ export default {
       );
       return new Response("OPENAI_API_KEY is not set", { status: 500 });
     }
+    
+    if (!env.GEMINI_API_KEY) {
+      console.error(
+        "GEMINI_API_KEY is not set, don't forget to set it locally in .dev.vars, and use `wrangler secret bulk .dev.vars` to upload it to production"
+      );
+      return new Response("GEMINI_API_KEY is not set", { status: 500 });
+    }
+    
     return (
       // Route the request to our agent or return 404 if not found
       (await routeAgentRequest(request, env)) ||

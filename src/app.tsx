@@ -2,7 +2,7 @@ import { useEffect, useState, useRef } from "react";
 import { useAgent } from "agents-sdk/react";
 import { useAgentChat } from "agents-sdk/ai-react";
 import { type Message } from "@ai-sdk/react";
-import { APPROVAL } from "./shared";
+import { APPROVAL, MODEL_TYPES } from "./shared";
 import type { tools } from "./tools";
 
 // List of tools that require human confirmation
@@ -12,6 +12,7 @@ const toolsRequiringConfirmation: (keyof typeof tools)[] = [
 
 export default function Chat() {
   const [theme, setTheme] = useState<"dark" | "light">("dark");
+  const [model, setModel] = useState<typeof MODEL_TYPES[keyof typeof MODEL_TYPES]>(MODEL_TYPES.GPT4O);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
@@ -36,6 +37,7 @@ export default function Chat() {
 
   const agent = useAgent({
     agent: "chat",
+    params: { model }, // Pass the selected model to the agent
   });
 
   const {
@@ -74,6 +76,18 @@ export default function Chat() {
           <p className="subtitle">Powered by Cloudflare Agents</p>
         </div>
         <div className="controls-container">
+          {/* Model selection dropdown */}
+          <div className="model-selector">
+            <select
+              value={model}
+              onChange={(e) => setModel(e.target.value as typeof model)}
+              className="model-dropdown"
+              aria-label="Select AI model"
+            >
+              <option value={MODEL_TYPES.GPT4O}>GPT-4o</option>
+              <option value={MODEL_TYPES.GEMINI}>Gemini Flash</option>
+            </select>
+          </div>
           <button
             onClick={toggleTheme}
             className="theme-switch"
@@ -97,9 +111,16 @@ export default function Chat() {
                 Start a conversation with your AI assistant. Try asking about:
               </p>
               <ul>
-                <li>🌤️ Weather information for any city</li>
-                <li>🕒 Local time in different locations</li>
+                <li>🌤️ Weather information for any city (GPT-4o only)</li>
+                <li>🕒 Local time in different locations (GPT-4o only)</li>
+                <li>💬 General questions (available with both models)</li>
               </ul>
+              <p className="model-note">
+                Current model: <strong>{model}</strong>
+                {model === MODEL_TYPES.GEMINI && (
+                  <span> (Tools are disabled for Gemini)</span>
+                )}
+              </p>
             </div>
           )}
           {messages?.map((m: Message) => (

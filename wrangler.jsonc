@@ -31,6 +31,12 @@
 	],
 	"observability": {
 		"enabled": true
+	},
+	"vars": {
+		"MODEL_TYPES": {
+			"GPT4O": "gpt-4o",
+			"GEMINI": "gemini-flash"
+		}
 	}
   /**
    * Smart Placement
